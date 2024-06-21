@@ -20,6 +20,9 @@ class CarrinhoController{
             throw new AppError('Esse produto já está adicionado ao seu carrinho.')
         }
 
+        if(checkProduto.quantidade === 0){
+            throw new AppError('Produto sem estoque.')
+        }
         await knex('carrinhos').insert({
             id_produto: checkProduto.id,
             id_user: user.id

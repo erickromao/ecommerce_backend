@@ -1,5 +1,8 @@
 const knex = require('../database/knex')
 const { AppError } = require('../utils/AppError')
+const axios = require('axios')
+require('dotenv').config()
+
 
 
 class CheckoutController{
@@ -7,21 +10,28 @@ class CheckoutController{
     async boleto(request, response){
         const user = request.user.userInfo
         const {
-                client: {
                 name,
                 document,
                 phoneNumber,
                 email
-            }
+            
         } = request.body
+       
+        if(!name || !document || !phoneNumber || !email){
+            throw new AppError('Campos obrigatórios: client:{ name, document, phoneNumber, email}')
+        }
         
-        const [enderecoUser] = await knex('enderecos').where({id_user:user.id})
+        const [enderecoUser] = await knex('enderecos').where({user_id:user.id})
         if(!enderecoUser){
             throw new AppError('Necessário adicionar seu endereço, atualize seu usuário.')
         }
 
         //Informaçoes do carrinho
         const carrinhoUser = await knex('carrinhos').where({id_user: user.id})
+
+        if(carrinhoUser.length === 0){
+            throw new AppError('Carrinho do usuário está vazio.')
+        }
 
         const idsProdutos = carrinhoUser.map(item=> item.id_produto)
 
@@ -31,11 +41,24 @@ class CheckoutController{
 
         const somaPrecos = produtosCarrinhoCurrent.reduce((total, produto)=> total + produto.preco, 0)
 
-
+        function geradorRequestNumber(){
+            const numero = Math.floor(10000000 + Math.random() * 90000000)
+            return numero.toString()
+        }
+        const validadeBOleto = "2024-10-30"
         //Objeto com as informacoes 
+
+        const numeroRandom = geradorRequestNumber()
+
+        const CarrinhoCheckout = produtosCarrinho.map(produto => ({
+            description: produto.nome,
+            quantity: 1,
+            value: parseFloat(produto.preco.toFixed(2))
+        }))
+
         const data = {
-            requestNumber,
-            dueDate,
+            requestNumber : numeroRandom.toString(),
+            dueDate: validadeBOleto,
             amount: parseFloat(somaPrecos.toFixed(2)),
             shippingAmount: 0,
             usernameCheckout: "checkout",
@@ -45,9 +68,9 @@ class CheckoutController{
                 phoneNumber,
                 email,
                 address: {
-                    codIbge:"360000",
+                    codIbge:"3302205",
                     street: enderecoUser.rua,
-                    number: enderecoUser.numero,
+                    number: enderecoUser.numero.toString(),
                     complement: "",
                     zipCode:"74663-520",
                     neighborhood:enderecoUser.bairro,
@@ -55,47 +78,54 @@ class CheckoutController{
                     state: enderecoUser.uf
                 }
             },
-            products:
-            produtosCarrinhoCurrent
-        } 
+            products: CarrinhoCheckout
+            }
+
+        const config = {
+            method: 'post',
+            url: process.env.URL_BOLETO,
+            headers:{
+                'ci': process.env.SUITPAY_CI,
+                'cs': process.env.SUITPAY_CS,
+                'content-Type': 'application/json'
+            },
+            data: JSON.stringify(data),
+            maxBodyLength: Infinity
+        }
+        axios(config)
+            .then(async resp=>{
+           
+            try{
+                await knex('produtos')
+                .whereIn('id', idsProdutos)
+                .decrement('quantidade', 1)
+               
+                await knex('pedidos').insert({
+                    id_user: user.id,
+                    numero: numeroRandom.toString(),
+                    id_produtos: JSON.stringify(idsProdutos),
+                    total: parseFloat(somaPrecos.toFixed(2))
+                })
+            }catch(err){
+                console.error(err)
+                return response.send('Houve um erro no pedido.')
+            }
+
+            await knex('carrinhos').where({id_user:user.id}).delete()
+
+                response.json({
+                    message: "Boleto gerado com sucesso.",
+                    pedido: CarrinhoCheckout,
+                    boleto: resp.data
+                })
+
+
+            }).catch(err=>{
+                response.status(500).json({err: err.message})
+            })
 
     }
 }
 
+module.exports = CheckoutController
         
-
-// {
-//     "requestNumber": "12345",
-//     "dueDate":"2022-10-30",
-//     "amount": 300.00,
-//     "shippingAmount": 10.0,
-//     "usernameCheckout": "checkout",
-//     "client": {
-//         "name":"José da Silva",
-//         "document":"927.300.300-18",
-//         "phoneNumber": "62999815500",
-//         "email": "josesilva@gmail.com",
-//           "address": {
-//               "codIbge":"5208707",
-//               "street":"Rua Paraíba",
-//               "number":"150",
-//               "complement":"",
-//               "zipCode":"74663-520",
-//               "neighborhood":"Goiânia 2",
-//               "city":"Goiânia",
-//               "state":"GO"
-//           }
-//     },
-//     "products": [
-//       {
-//         "description": "Tênis",
-//         "quantity": 1,
-//         "value": 200.0
-//       },
-//       {
-//         "description": "Camiseta M",
-//         "quantity": 2,
-//         "value": 75.0
-//       }
-//     ]
-//   }
