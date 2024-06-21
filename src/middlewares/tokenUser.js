@@ -10,7 +10,7 @@ function tokenUser(request, response, next){
     if(!token){
         throw new AppError('Sem autenticação.')
     }
-    jwt.verify(KEY, token, (user, err)=>{
+    jwt.verify(token, KEY, (err, user)=>{
         if(err){
             throw new AppError('Acesso negado.')
         }

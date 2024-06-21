@@ -6,6 +6,10 @@ const UsersController = require('../controllers/UsersController')
 
 const usersController = new UsersController()
 
-routerUser.post('/register', usersController.create)
+routerUser.post('/', usersController.create)
+routerUser.post('/login', usersController.login)
+routerUser.get('/', userToken, usersController.read)
+routerUser.delete('/', userToken, usersController.delete )
+
 
 module.exports = routerUser
